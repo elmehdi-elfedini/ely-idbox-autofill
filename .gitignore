@@ -1,0 +1,14 @@
+# Local reader export and identity-card screenshots can contain personal data.
+*.csv
+image.png
+
+# Local build output and temporary rendering files.
+dist/
+.tmp/
+__pycache__/
+*.py[cod]
+
+# Editor and operating-system files.
+.DS_Store
+Thumbs.db
+.vscode/

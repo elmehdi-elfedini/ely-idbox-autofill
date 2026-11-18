@@ -1,0 +1,43 @@
+name: Validate and package extension
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check background.js
+          node --check content.js
+          node --check sidepanel.js
+
+      - name: Package only extension runtime files
+        run: python scripts/package_extension.py --output dist/ely-idbox.zip
+
+      - name: Upload installable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ely-idbox-extension
+          path: dist/ely-idbox.zip
+          if-no-files-found: error

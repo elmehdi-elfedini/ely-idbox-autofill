@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>IdBox — Remplissage automatique</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #f6f7f9;
+      color: #111827;
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .title {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: #111827;
+    }
+    .status-text {
+      font-size: 11.5px;
+      color: #6b7280;
+      font-weight: 400;
+    }
+
+    .alert {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-left: 3px solid #ef4444;
+      color: #374151;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 11.5px;
+      line-height: 1.45;
+    }
+
+    .card {
+      background: #ffffff;
+      border: 1px solid #eceef2;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 10px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .info-row:first-child { padding-top: 0; }
+    .info-row:last-of-type { border-bottom: none; padding-bottom: 0; }
+    .mrz-row {
+      display: block;
+      border-bottom: none;
+      padding-top: 10px;
+    }
+    .mrz-row .label { display: block; margin-bottom: 7px; }
+    .mrz-value {
+      display: block;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: #111827;
+      font-family: "OCR B", "Courier New", monospace;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      line-height: 1.8;
+      text-align: left;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .label {
+      color: #6b7280;
+      font-size: 12px;
+    }
+    .val {
+      font-weight: 500;
+      color: #111827;
+      font-size: 12.5px;
+      text-align: right;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid #f3f4f6;
+    }
+    .auto-fill-card { padding: 10px 14px; }
+
+    /* Clean modern switch */
+    .switch-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 12px;
+      color: #4b5563;
+    }
+    .switch {
+      position: relative;
+      width: 32px;
+      height: 18px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: #d1d5db;
+      border-radius: 999px;
+      transition: 0.2s;
+    }
+    .slider::before {
+      content: "";
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      left: 2px;
+      top: 2px;
+      background: #ffffff;
+      border-radius: 50%;
+      transition: 0.2s;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+    }
+    .switch input:checked + .slider {
+      background: #111827;
+    }
+    .switch input:checked + .slider::before {
+      transform: translateX(14px);
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      font-family: inherit;
+      font-weight: 500;
+      transition: opacity 0.15s, background 0.15s;
+    }
+    .btn-primary {
+      background: #111827;
+      color: #ffffff;
+      padding: 7px 14px;
+      font-size: 12px;
+    }
+    .btn-primary:hover { background: #1f2937; }
+
+    details summary {
+      cursor: pointer;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: #374151;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    .muted { font-size: 11px; color: #9ca3af; font-weight: 400; }
+
+    .map-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .map-row:last-child { border-bottom: none; }
+    .map-info { flex: 1; min-width: 0; }
+    .map-name { font-size: 12px; color: #374151; }
+    .map-sel {
+      font-size: 10.5px;
+      color: #9ca3af;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .btn-pick {
+      padding: 4px 10px;
+      font-size: 11px;
+      background: #f3f4f6;
+      color: #374151;
+    }
+    .btn-pick:hover { background: #e5e7eb; }
+    .btn-clear {
+      padding: 4px 6px;
+      font-size: 11px;
+      background: transparent;
+      color: #9ca3af;
+    }
+    .btn-clear:hover { color: #ef4444; }
+
+    .footer-link {
+      text-align: center;
+      margin-top: 8px;
+    }
+    .footer-link summary {
+      justify-content: center;
+      font-size: 11px;
+      color: #9ca3af;
+      font-weight: 400;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 7px 9px;
+      border: 1px solid #e5e7eb;
+      border-radius: 7px;
+      font-size: 11px;
+      margin: 8px 0 6px;
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: #9ca3af; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">IdBox</div>
+    <div id="statusText" class="status-text">Recherche…</div>
+  </div>
+
+  <div id="fileAccessWarn" class="alert hidden">
+    Activez <b>« Autoriser l’accès aux URL de fichiers »</b> dans <code>chrome://extensions</code> &rarr; <b>Détails</b>.
+  </div>
+
+  <div class="card auto-fill-card">
+    <label class="switch-wrap">
+      <span class="switch">
+        <input type="checkbox" id="chkAutoFill" checked />
+        <span class="slider"></span>
+      </span>
+      <span>Remplissage auto</span>
+    </label>
+  </div>
+
+  <div id="dataCard" class="card hidden">
+    <div class="info-row">
+      <span class="label">Nom complet</span>
+      <span class="val" id="pvFullName"></span>
+    </div>
+    <div class="info-row">
+      <span class="label">CIN</span>
+      <span class="val" id="pvCin"></span>
+    </div>
+    <div class="info-row">
+      <span class="label">Date de naissance</span>
+      <span class="val" id="pvBirth"></span>
+    </div>
+    <div class="info-row">
+      <span class="label">Date d’expiration</span>
+      <span class="val" id="pvExpiry"></span>
+    </div>
+    <div class="info-row">
+      <span class="label">Sexe</span>
+      <span class="val" id="pvGender"></span>
+    </div>
+    <div class="info-row mrz-row">
+      <span class="label">MRZ</span>
+      <span class="mrz-value" id="pvMrz"></span>
+    </div>
+
+    <div class="actions">
+      <button id="btnFillNow" class="btn-primary">Remplir le formulaire</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>
+        <span>Association des champs</span>
+        <span id="siteHost" class="muted">Aucun site</span>
+      </summary>
+      <div id="mappingList" style="margin-top: 10px;"></div>
+    </details>
+  </div>
+
+  <details class="footer-link">
+    <summary>Chemin personnalisé du fichier CSV</summary>
+    <input type="text" id="manualPath" placeholder="C:\Users\...\Documents\ELYCTIS\Extracted data.csv" />
+    <button id="btnManualSave" class="btn-pick" style="width:100%; padding:6px;">Enregistrer le chemin</button>
+  </details>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
