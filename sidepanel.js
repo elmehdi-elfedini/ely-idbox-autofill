@@ -29,6 +29,8 @@ const FIELDS = [
   }
   
   let currentPreviewKey;
+  let lastStatusUpdateKey;
+  let currentMappingsKey;
   function showPreview(data) {
     const card = document.getElementById("dataCard");
     const hasData = data && Object.values(data).some((value) => String(value || "").trim());
@@ -51,16 +53,21 @@ const FIELDS = [
   }
   
   function setStatus(connected, url, hasData) {
+    const updateKey = JSON.stringify([connected, url, hasData]);
+    if (updateKey === lastStatusUpdateKey) return;
+    lastStatusUpdateKey = updateKey;
     const el = document.getElementById("statusText");
     if (!hasData) {
-      el.textContent = "";
-      el.title = "";
+      if (el.textContent !== "") el.textContent = "";
+      if (el.title !== "") el.title = "";
     } else if (connected && url) {
       el.textContent = "Prêt";
-      el.title = decodeURIComponent(url.replace("file:///", ""));
+      const title = decodeURIComponent(url.replace("file:///", ""));
+      if (el.title !== title) el.title = title;
     } else {
       el.textContent = "Recherche…";
-      el.title = "Recherche de Documents\\ELYCTIS\\Extracted data.csv";
+      const title = "Recherche de Documents\\ELYCTIS\\Extracted data.csv";
+      if (el.title !== title) el.title = title;
     }
   }
   
@@ -112,12 +119,17 @@ const FIELDS = [
     const listEl = document.getElementById("mappingList");
   
     if (!info) {
+      if (currentMappingsKey === "none") return;
+      currentMappingsKey = "none";
       hostEl.textContent = "Ouvrez un site web";
       listEl.innerHTML = "";
       return;
     }
   
     if (info.host === "10.0.240.11" && info.url.includes("/sahty/stepper")) {
+      const renderKey = JSON.stringify([info.tabId, info.url, "sahty"]);
+      if (renderKey === currentMappingsKey) return;
+      currentMappingsKey = renderKey;
       hostEl.textContent = "Sahty Stepper";
       listEl.innerHTML = `<div class="muted" style="padding:4px 0;">Configuration prête pour Sahty Stepper.</div>`;
       return;
@@ -125,7 +137,11 @@ const FIELDS = [
   
     const map = await getMappings(info.host);
     const count = Object.keys(map).length;
-    hostEl.textContent = count > 0 ? `${info.host} (${count} champs)` : info.host;
+    const hostText = count > 0 ? `${info.host} (${count} champs)` : info.host;
+    const renderKey = JSON.stringify([info.tabId, info.url, hostText, map]);
+    if (renderKey === currentMappingsKey) return;
+    currentMappingsKey = renderKey;
+    hostEl.textContent = hostText;
     listEl.innerHTML = "";
   
     FIELDS.forEach((f) => {
@@ -313,11 +329,11 @@ const FIELDS = [
   
   setInterval(() => {
     chrome.runtime.sendMessage({ type: "CHECK_NOW" }, (res) => {
-      if (chrome.runtime.lastError || !res) return;
+      if (chrome.runtime.lastError || !res || typeof res.connected !== "boolean") return;
       setStatus(res.connected, res.url, Boolean(res.data));
       showPreview(res.data);
     });
-  }, 400);
+  }, 1000);
   
   (async () => {
     chrome.extension.isAllowedFileSchemeAccess((allowed) => {

@@ -68,11 +68,9 @@ function setFieldValue(el, val) {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     setter.call(input, query);
     input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
     const textField = input.closest("vaadin-text-field");
     if (textField) {
       textField.value = query;
-      textField.dispatchEvent(new Event("change", { bubbles: true }));
     }
     lastAutofilledPatientSearch = query;
   }

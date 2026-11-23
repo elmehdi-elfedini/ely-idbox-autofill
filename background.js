@@ -201,10 +201,8 @@ async function fillSahtyVaadinPage(tabId, data, fillForm) {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
         setter.call(input, val);
         input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
         if (tf) {
           tf.value = val;
-          tf.dispatchEvent(new Event("change", { bubbles: true }));
         }
       };
 
@@ -224,10 +222,8 @@ async function fillSahtyVaadinPage(tabId, data, fillForm) {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
         setter.call(input, val);
         input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
         if (tf) {
           tf.value = val;
-          tf.dispatchEvent(new Event("change", { bubbles: true }));
         }
         return true;
       };
