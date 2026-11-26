@@ -10,7 +10,9 @@ function setFieldValue(el, val) {
           (low === "f" && /femme|fem/i.test(o.text))
       );
       if (opt) {
+        el.blur();
         el.value = opt.value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
       }
       return;
@@ -19,6 +21,7 @@ function setFieldValue(el, val) {
       el.tagName === "TEXTAREA"
         ? HTMLTextAreaElement.prototype
         : HTMLInputElement.prototype;
+    el.blur();
     const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
     setter.call(el, val);
     el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -39,56 +42,68 @@ function setFieldValue(el, val) {
     }
   }
 
-  let autoFillEnabled = true;
-  let lastAutofilledPatientSearch = "";
-  chrome.storage.local.get("autoFill", (store) => {
-    autoFillEnabled = store.autoFill !== false;
-  });
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && changes.autoFill) {
-      autoFillEnabled = changes.autoFill.newValue !== false;
-    }
-  });
-
-  function fillSahtyPatientSearch(data) {
-    if (!data) return;
-    const normalize = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    const input = Array.from(document.querySelectorAll("input[placeholder]")).find((candidate) => {
-      const placeholder = normalize(candidate.placeholder);
-      return placeholder.startsWith("nom, ") && placeholder.endsWith("ipp ou cin");
-    });
-    const query = data.cin || [data.lastName, data.firstName].filter(Boolean).join(" ");
-    if (!query) return;
-    const currentValue = input?.value.trim() || "";
-    if (!input || (currentValue && currentValue !== lastAutofilledPatientSearch && currentValue !== query)) return;
-    if (currentValue === query) {
-      lastAutofilledPatientSearch = query;
-      return;
-    }
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-    setter.call(input, query);
-    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-    const textField = input.closest("vaadin-text-field");
-    if (textField) {
-      textField.value = query;
-    }
-    lastAutofilledPatientSearch = query;
-  }
-
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "APPLY_MAPPINGS" && msg.mappings && msg.data) {
       applyMappings(msg.mappings, msg.data);
     }
   });
-  
-  setInterval(() => {
-    if (document.hidden) return;
-    chrome.runtime.sendMessage(
-      { type: "POLL_CSV", host: window.location.hostname },
-      (res) => {
-        if (chrome.runtime.lastError || !res) return;
-        if (autoFillEnabled) fillSahtyPatientSearch(res.data);
-        if (res.fill) applyMappings(res.mappings, res.data);
-      }
+
+  const navigationType = performance.getEntriesByType("navigation")[0]?.type;
+  if (navigationType === "reload") {
+    try {
+      const pendingMessage = chrome.runtime.sendMessage({ type: "PAGE_REFRESHED" }, () => {
+        try {
+          void chrome.runtime.lastError;
+        } catch (_) {}
+      });
+      if (pendingMessage && typeof pendingMessage.catch === "function") pendingMessage.catch(() => {});
+    } catch (_) {}
+  }
+
+  let lastManualEntryNotice = 0;
+  const onManualFormEdit = (event) => {
+    if (!event.isTrusted || Date.now() - lastManualEntryNotice < 500) return;
+    const path = event.composedPath?.() || [event.target];
+    const isFormField = path.some(
+      (node) =>
+        node instanceof Element &&
+        node.matches("input, textarea, select, vaadin-text-field, vaadin-combo-box, vaadin-date-picker")
     );
+    if (!isFormField) return;
+
+    lastManualEntryNotice = Date.now();
+    try {
+      const pendingMessage = chrome.runtime.sendMessage({ type: "MANUAL_ENTRY_STARTED" });
+      if (pendingMessage && typeof pendingMessage.catch === "function") pendingMessage.catch(() => {});
+    } catch (_) {}
+  };
+  document.addEventListener("beforeinput", onManualFormEdit, true);
+  document.addEventListener("input", onManualFormEdit, true);
+  document.addEventListener("change", onManualFormEdit, true);
+  
+  const pollTimer = setInterval(() => {
+    if (document.hidden) return;
+    try {
+      if (!chrome.runtime?.id) {
+        clearInterval(pollTimer);
+        return;
+      }
+      const pendingMessage = chrome.runtime.sendMessage(
+        { type: "POLL_CSV", host: window.location.hostname },
+        () => {
+          // Read lastError so a missing/reloaded service worker stays quiet.
+          try {
+            void chrome.runtime.lastError;
+          } catch (_) {}
+        }
+      );
+      // Some Chromium builds also return a promise when a callback is passed.
+      // Handle its rejection in case the extension is reloaded mid-request.
+      if (pendingMessage && typeof pendingMessage.catch === "function") {
+        pendingMessage.catch(() => clearInterval(pollTimer));
+      }
+    } catch (_) {
+      // The extension may be reloaded while this page is still open.
+      clearInterval(pollTimer);
+    }
   }, 300);

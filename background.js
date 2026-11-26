@@ -140,6 +140,12 @@ async function autoDetectCsv() {
       const encoded = u.includes("%") ? u : encodeURIComponent(u);
       candidates.push(`file:///C:/Users/${encoded}/Documents/ELYCTIS/Extracted%20data.csv`);
       candidates.push(`file:///C:/Users/${encoded}/OneDrive/Documents/ELYCTIS/Extracted%20data.csv`);
+      const organizationOneDrive = encodeURIComponent(
+        "OneDrive - Université Mohammed 6 des Sciences et de la Santé"
+      );
+      candidates.push(
+        `file:///C:/Users/${encoded}/${organizationOneDrive}/Documents/ELYCTIS/Extracted%20data.csv`
+      );
     }
 
     for (const url of candidates) {
@@ -168,23 +174,23 @@ async function fillMappedPage(tabId, host, data, mappings) {
   return true;
 }
 
-async function autoFillTab(tab, data, mappings) {
+async function autoFillTab(tab, data, mappings, replaceExisting = false) {
   if (!tab || !tab.id || !tab.url) return false;
   const urlObj = new URL(tab.url);
   if (urlObj.hostname === "10.0.240.11") {
-    if (!urlObj.pathname.includes("/sahty/stepper")) return true;
-    return fillSahtyVaadinPage(tab.id, data, urlObj.pathname.includes("/sahty/stepper"));
+    if (!urlObj.pathname.includes("/sahty/stepper")) return false;
+    return fillSahtyVaadinPage(tab.id, data, urlObj.pathname.includes("/sahty/stepper"), replaceExisting);
   }
   return fillMappedPage(tab.id, urlObj.hostname, data, mappings);
 }
 
 // Vaadin-aware MAIN-world filler for /sahty/stepper
-async function fillSahtyVaadinPage(tabId, data, fillForm) {
+async function fillSahtyVaadinPage(tabId, data, fillForm, replaceExisting = false) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
-    args: [data, fillForm],
-    func: async (d, fillFormArg) => {
+    args: [data, fillForm, replaceExisting],
+    func: async (d, fillFormArg, replaceExistingArg) => {
       const normalizeText = (value) =>
         String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       const findInput = (hint) => {
@@ -193,46 +199,95 @@ async function fillSahtyVaadinPage(tabId, data, fillForm) {
           normalizeText(candidate.placeholder).includes(normalizedHint)
         );
       };
+      const waitForInput = async (hint, timeoutMs = 5000) => {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          const input = findInput(hint);
+          if (input) return input;
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+        return findInput(hint);
+      };
+      const blurFocusedElement = () => {
+        let active = document.activeElement;
+        while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+        if (active && active !== document.body && active !== document.documentElement) active.blur?.();
+      };
+      let manualEntryStarted = false;
+      const detectManualEntry = (event) => {
+        if (!event.isTrusted) return;
+        const path = event.composedPath?.() || [event.target];
+        if (path.some((node) => node instanceof Element && node.matches(
+          "input, textarea, select, vaadin-text-field, vaadin-combo-box, vaadin-date-picker"
+        ))) manualEntryStarted = true;
+      };
+      const stopDetectingManualEntry = () => {
+        document.removeEventListener("beforeinput", detectManualEntry, true);
+        document.removeEventListener("input", detectManualEntry, true);
+        document.removeEventListener("change", detectManualEntry, true);
+      };
+      document.addEventListener("beforeinput", detectManualEntry, true);
+      document.addEventListener("input", detectManualEntry, true);
+      document.addEventListener("change", detectManualEntry, true);
 
-      const setVaadinText = (placeholder, val) => {
-        const input = findInput(placeholder);
-        if (!input || !val || input.value.trim()) return;
+      const setVaadinText = async (placeholder, val) => {
+        if (manualEntryStarted) return false;
+        if (!String(val || "").trim()) return true;
+        const input = await waitForInput(placeholder);
+        if (!input || manualEntryStarted) return false;
         const tf = input.closest("vaadin-text-field");
+        if (input.value.trim() === String(val).trim() || tf?.value === val) return true;
+        if (input.value.trim() && !replaceExistingArg) return true;
+        input.blur();
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
         setter.call(input, val);
         input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
         if (tf) {
           tf.value = val;
+          tf.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
         }
+        input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+        return input.value.trim() === String(val).trim() || tf?.value === val;
       };
 
       const setVaadinPatientSearch = async (val) => {
         let input = null;
-        const maxAttempts = 1;
-        for (let attempt = 0; attempt < maxAttempts && !input; attempt++) {
+        const deadline = Date.now() + 5000;
+        while (!input && Date.now() < deadline) {
           input = Array.from(document.querySelectorAll("input[placeholder]")).find((candidate) => {
             const placeholder = normalizeText(candidate.placeholder);
             return placeholder.startsWith("nom, ") && placeholder.endsWith("ipp ou cin");
           });
-          if (!input) await new Promise((resolve) => setTimeout(resolve, 250));
+          if (!input) await new Promise((resolve) => setTimeout(resolve, 150));
         }
-        if (!input || !val) return false;
-        if (input.value.trim()) return true;
+        if (manualEntryStarted) return false;
+        if (!val) return true;
+        if (!input) return false;
         const tf = input.closest("vaadin-text-field");
+        if (input.value.trim() === String(val).trim() || tf?.value === val) return true;
+        if (input.value.trim() && !replaceExistingArg) return true;
+        input.blur();
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
         setter.call(input, val);
         input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
         if (tf) {
           tf.value = val;
+          tf.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
         }
-        return true;
+        input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+        return input.value.trim() === String(val).trim() || tf?.value === val;
       };
 
       const setVaadinDate = async (placeholder, isoVal, dmyVal) => {
-        const input = findInput(placeholder);
-        if (!input || !/^\d{4}-\d{2}-\d{2}$/.test(isoVal || "") || !dmyVal || input.value.trim()) return;
+        if (manualEntryStarted) return false;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(isoVal || "") || !dmyVal) return true;
+        const input = await waitForInput(placeholder);
+        if (!input || manualEntryStarted) return false;
         const dp = input.closest("vaadin-date-picker");
-        if (!dp) return;
+        if (!dp) return false;
+        if (dp.value === isoVal) return true;
+        if (input.value.trim() && !replaceExistingArg) return true;
+        input.blur();
 
         const [yyyy, mm, dd] = isoVal.split("-").map(Number);
         let displayStr = dmyVal;
@@ -258,14 +313,26 @@ async function fillSahtyVaadinPage(tabId, data, fillForm) {
         );
         dp.dispatchEvent(new Event("change", { bubbles: true }));
         if (typeof dp.close === "function") dp.close();
+        return dp.value === isoVal;
       };
 
       const setVaadinCombo = async (placeholder, patterns) => {
-        const input = findInput(placeholder);
-        if (!input) return;
+        const input = await waitForInput(placeholder);
+        if (!input || manualEntryStarted) return false;
         const cb = input.closest("vaadin-combo-box");
-        if (!cb) return;
-        if (cb.value || cb.selectedItem) return;
+        if (!cb) return false;
+        const currentLabel = normalizeText(
+          cb.selectedItem?.[cb.itemLabelPath || "label"] ?? cb.selectedItem?.label ?? cb.value
+        );
+        if (patterns.some((re) => re.test(currentLabel))) return true;
+        const closeCombo = () => {
+          // Vaadin hides its overlay on close; move focus first so it is not
+          // left inside a subtree marked aria-hidden.
+          blurFocusedElement();
+          input.blur();
+          cb.close();
+        };
+        if ((cb.value || cb.selectedItem) && !replaceExistingArg) return true;
 
         const matchInList = (items) => {
           if (!Array.isArray(items)) return null;
@@ -285,67 +352,121 @@ async function fillSahtyVaadinPage(tabId, data, fillForm) {
           return null;
         };
 
-        let items = cb.filteredItems && cb.filteredItems.length ? cb.filteredItems : cb.items;
-        if (!items || items.length === 0) {
-          cb.open();
-          await new Promise((r) => setTimeout(r, 250));
-          items = cb.filteredItems && cb.filteredItems.length ? cb.filteredItems : cb.items;
+        const deadline = Date.now() + 5000;
+        let found = null;
+        while (!found && !manualEntryStarted && Date.now() < deadline) {
+          const items = cb.filteredItems && cb.filteredItems.length ? cb.filteredItems : cb.items;
+          found = matchInList(items);
+          if (!found) {
+            if (!cb.opened) cb.open();
+            await new Promise((r) => setTimeout(r, 150));
+          }
         }
-
-        const found = matchInList(items);
+        if (manualEntryStarted) {
+          closeCombo();
+          return false;
+        }
         if (found) {
+          if (cb.value === found.val || cb.selectedItem === found.item) {
+            closeCombo();
+            return true;
+          }
           cb.selectedItem = found.item;
           cb.value = found.val;
           cb.dispatchEvent(new Event("change", { bubbles: true }));
-          cb.close();
-          return;
+          closeCombo();
+          return cb.value === found.val || cb.selectedItem === found.item;
         }
 
-        cb.open();
-        await new Promise((r) => setTimeout(r, 250));
         const overlayItems = document.querySelectorAll("vaadin-combo-box-item");
+        let clicked = false;
         for (const el of overlayItems) {
           if (patterns.some((re) => re.test(normalizeText(el.textContent.trim())))) {
+            blurFocusedElement();
+            input.blur();
             el.click();
+            clicked = true;
             break;
           }
         }
-        cb.close();
+        closeCombo();
+        if (clicked) {
+          await new Promise((r) => setTimeout(r, 150));
+          const selectedLabel = normalizeText(
+            cb.selectedItem?.[cb.itemLabelPath || "label"] ?? cb.selectedItem?.label ?? cb.value
+          );
+          return patterns.some((re) => re.test(selectedLabel));
+        }
+        return false;
       };
 
       // 1. Text & Date fields
+      blurFocusedElement();
+      if (manualEntryStarted) {
+        stopDetectingManualEntry();
+        return { complete: false };
+      }
       const patientSearch = d.cin || [d.lastName, d.firstName].filter(Boolean).join(" ");
-      const searchFound = patientSearch ? await setVaadinPatientSearch(patientSearch) : false;
-      if (!fillFormArg) return searchFound;
-      setVaadinText("Entrez le nom", d.lastName);
-      setVaadinText("Entrez le prenom", d.firstName);
-      await setVaadinDate("date de naissance", d.birthDateISO, d.birthDateDMY);
+      const searchFound = patientSearch ? await setVaadinPatientSearch(patientSearch) : true;
+      if (!fillFormArg) {
+        stopDetectingManualEntry();
+        return searchFound;
+      }
+      if (manualEntryStarted) {
+        stopDetectingManualEntry();
+        return { complete: false };
+      }
+      const lastNameSet = await setVaadinText("Entrez le nom", d.lastName);
+      if (manualEntryStarted) {
+        stopDetectingManualEntry();
+        return { complete: false };
+      }
+      const firstNameSet = await setVaadinText("Entrez le prenom", d.firstName);
+      if (manualEntryStarted) {
+        stopDetectingManualEntry();
+        return { complete: false };
+      }
+      const birthDateSet = await setVaadinDate("date de naissance", d.birthDateISO, d.birthDateDMY);
+      if (manualEntryStarted) {
+        stopDetectingManualEntry();
+        return { complete: false };
+      }
 
       // 2. Gender
       const isMale = /^(m|h)/i.test(d.gender || "");
       const genderPatterns = isMale
         ? [/^m$/i, /^h$/i, /masculin/i, /homme/i, /^male$/i]
         : [/^f$/i, /feminin/i, /femme/i, /^female$/i];
-      await setVaadinCombo("sexe", genderPatterns);
+      const genderSet = d.gender ? await setVaadinCombo("sexe", genderPatterns) : true;
+      if (manualEntryStarted) {
+        stopDetectingManualEntry();
+        return { complete: false };
+      }
 
       // 3. Select "CINE" first, then fill N° CIN
-      await setVaadinCombo("nature de la piece", [/^cine$/i, /\bcine\b/i]);
+      const documentTypeSet = await setVaadinCombo("nature de la piece", [/^cine$/i, /\bcine\b/i]);
       await new Promise((r) => setTimeout(r, 200));
-      setVaadinText("Entrez le numero de la piece d'identite", d.cin);
+      const cinSet = await setVaadinText("Entrez le numero de la piece d'identite", d.cin);
+      const result = {
+        complete: searchFound && lastNameSet && firstNameSet && birthDateSet && genderSet && documentTypeSet && cinSet
+      };
+      stopDetectingManualEntry();
+      return result;
     }
   });
-  return Boolean(fillForm || results[0]?.result);
+  const result = results[0]?.result;
+  return fillForm ? Boolean(result?.complete) : Boolean(result);
 }
 
 let checking = false;
 let lastDetectTry = 0;
-const appliedSignaturesByPage = new Map();
-chrome.storage.session.remove("lastSignature");
 chrome.tabs.onRemoved.addListener((tabId) => {
-  const prefix = `${tabId}:`;
-  for (const key of appliedSignaturesByPage.keys()) {
-    if (key.startsWith(prefix)) appliedSignaturesByPage.delete(key);
-  }
+  chrome.storage.session.remove([
+    `lastSignature:${tabId}`,
+    `activeSignature:${tabId}`,
+    `manualOverride:${tabId}`,
+    `awaitingNewScan:${tabId}`
+  ]);
 });
 
 async function autoFillTabOnce(tab, data, mappings, signature) {
@@ -354,16 +475,34 @@ async function autoFillTabOnce(tab, data, mappings, signature) {
   const mapping = mappings?.[page.hostname];
   if (page.hostname !== "10.0.240.11" && (!mapping || Object.keys(mapping).length === 0)) return false;
 
-  const pageKey = `${tab.id}:${page.origin}${page.pathname}`;
-  const previous = appliedSignaturesByPage.get(pageKey);
-  if (previous?.signature === signature) {
-    if (page.hostname !== "10.0.240.11" || Date.now() - previous.at < 1500) return true;
+  const signatureKey = `lastSignature:${tab.id}`;
+  const activeKey = `activeSignature:${tab.id}`;
+  const manualOverrideKey = `manualOverride:${tab.id}`;
+  const awaitingKey = `awaitingNewScan:${tab.id}`;
+  const stored = await chrome.storage.session.get([signatureKey, activeKey, manualOverrideKey, awaitingKey]);
+  const previousSignature = stored[signatureKey];
+  const manualOverride = stored[manualOverrideKey];
+
+  if (stored[awaitingKey]) {
+    await chrome.storage.session.set({
+      [signatureKey]: signature,
+      [activeKey]: signature,
+      [awaitingKey]: false
+    });
+    await chrome.storage.session.remove(manualOverrideKey);
+    return true;
   }
 
-  const handled = await autoFillTab(tab, data, mappings);
-  // Retry Sahty after SPA navigation; setters only fill empty fields.
-  if (handled || page.hostname === "10.0.240.11") {
-    appliedSignaturesByPage.set(pageKey, { signature, at: Date.now() });
+  if (stored[activeKey] !== signature) {
+    await chrome.storage.session.set({ [activeKey]: signature });
+  }
+  if (previousSignature === signature || manualOverride === signature) return true;
+  if (manualOverride) await chrome.storage.session.remove(manualOverrideKey);
+
+  const isNewSignature = previousSignature !== signature;
+  const handled = await autoFillTab(tab, data, mappings, isNewSignature);
+  if (handled) {
+    await chrome.storage.session.set({ [signatureKey]: signature });
   }
   return handled;
 }
@@ -394,6 +533,7 @@ async function checkCsvAndUpdate(tab) {
         fill: false,
         connected: true,
         url: fileUrl,
+        signature: initParsed ? initParsed.signature : null,
         data: initParsed ? initParsed.data : null
       };
     }
@@ -407,14 +547,20 @@ async function checkCsvAndUpdate(tab) {
     }
 
     if (!parsed) {
-      return { fill: false, connected: true, url: fileUrl, data: null };
+      return { fill: false, connected: true, url: fileUrl, signature: null, data: null };
     }
 
     if (store.autoFill !== false && tab && tab.url) {
       await autoFillTabOnce(tab, parsed.data, store.mappings, parsed.signature);
     }
 
-    return { fill: false, connected: true, url: fileUrl, data: parsed ? parsed.data : null };
+    return {
+      fill: false,
+      connected: true,
+      url: fileUrl,
+      signature: parsed.signature,
+      data: parsed.data
+    };
   } finally {
     checking = false;
   }
@@ -449,7 +595,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "FILL_SAHTY_NOW") {
-    fillSahtyVaadinPage(msg.tabId, msg.data, true).then(() => sendResponse({ ok: true }));
+    fillSahtyVaadinPage(msg.tabId, msg.data, true, true).then(() => sendResponse({ ok: true }));
     return true;
   }
 
@@ -457,6 +603,52 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       const res = await checkCsvAndUpdate(null);
       sendResponse({ ok: res.connected, url: res.url, data: res.data });
+    })();
+    return true;
+  }
+
+  if (msg.type === "MANUAL_ENTRY_STARTED") {
+    const tabId = sender.tab?.id;
+    if (tabId == null) {
+      sendResponse({ ok: false });
+      return;
+    }
+    (async () => {
+      const activeKey = `activeSignature:${tabId}`;
+      const completedKey = `lastSignature:${tabId}`;
+      const stored = await chrome.storage.session.get([activeKey, completedKey]);
+      const signature = stored[activeKey] || stored[completedKey];
+      if (signature) {
+        await chrome.storage.session.set({ [`manualOverride:${tabId}`]: signature });
+      }
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  if (msg.type === "PAGE_REFRESHED") {
+    const tabId = sender.tab?.id;
+    if (tabId == null) {
+      sendResponse({ ok: false });
+      return;
+    }
+    (async () => {
+      const signatureKey = `lastSignature:${tabId}`;
+      const activeKey = `activeSignature:${tabId}`;
+      const awaitingKey = `awaitingNewScan:${tabId}`;
+      const manualOverrideKey = `manualOverride:${tabId}`;
+      await chrome.storage.session.set({ [awaitingKey]: true });
+      await chrome.storage.session.remove(manualOverrideKey);
+
+      const result = await checkCsvAndUpdate(null);
+      if (result.signature) {
+        await chrome.storage.session.set({
+          [signatureKey]: result.signature,
+          [activeKey]: result.signature,
+          [awaitingKey]: false
+        });
+      }
+      sendResponse({ ok: true });
     })();
     return true;
   }

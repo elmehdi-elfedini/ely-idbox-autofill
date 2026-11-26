@@ -21,12 +21,12 @@ Official update guidance: [Chrome extension update lifecycle](https://developer.
 ## GitHub release setup
 
 1. Create a GitHub repository and push this source to its `main` branch.
-2. Keep the manifest version and release tag identical. The current version is `2.2`, so its release tag is `v2.2`.
+2. Keep the manifest version and release tag identical. The current version is `2.3`, so its release tag is `v2.3`.
 3. Push a tag to run the release workflow:
 
    ```sh
-   git tag v2.2
-   git push origin v2.2
+   git tag v2.3
+   git push origin v2.3
    ```
 
 Each subsequent release needs a higher version in `manifest.json` and a matching `v<version>` tag.
@@ -74,5 +74,5 @@ python scripts/package_extension.py --output dist/ely-idbox.zip
 For a release build, include the exact tag so the script checks the version:
 
 ```sh
-python scripts/package_extension.py --tag v2.2 --output dist/ely-idbox.zip
+python scripts/package_extension.py --tag v2.3 --output dist/ely-idbox.zip
 ```

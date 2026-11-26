@@ -296,12 +296,15 @@ const FIELDS = [
                   (low === "f" && /femme|fem/i.test(o.text))
               );
               if (opt) {
+                el.blur();
                 el.value = opt.value;
+                el.dispatchEvent(new Event("input", { bubbles: true }));
                 el.dispatchEvent(new Event("change", { bubbles: true }));
               }
               return;
             }
             const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            el.blur();
             Object.getOwnPropertyDescriptor(proto, "value").set.call(el, val);
             el.dispatchEvent(new Event("input", { bubbles: true }));
             el.dispatchEvent(new Event("change", { bubbles: true }));
